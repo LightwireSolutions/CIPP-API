@@ -29,7 +29,7 @@ function Set-CIPPSPOTenant {
 
     #>
     [CmdletBinding(SupportsShouldProcess = $true)]
-    Param(
+    param(
         [Parameter(ValueFromPipelineByPropertyName = $true, Mandatory = $true)]
         [string]$TenantFilter,
         [Parameter(ValueFromPipelineByPropertyName = $true, Mandatory = $true)]
@@ -65,7 +65,7 @@ function Set-CIPPSPOTenant {
                 }
                 $xml = @"
     <SetProperty Id="$x" ObjectPathId="110" Name="$Property">
-        <Parameter Type="Boolean">$($PropertyToSet)</Parameter>
+        <Parameter Type="$PropertyType">$($PropertyToSet)</Parameter>
     </SetProperty>
 "@
                 $SetProperty.Add($xml)
@@ -88,6 +88,14 @@ function Set-CIPPSPOTenant {
 
         if ($PSCmdlet.ShouldProcess(($Properties.Keys -join ', '), 'Set Tenant Properties')) {
             New-GraphPostRequest -scope "$AdminURL/.default" -tenantid $TenantFilter -Uri "$AdminURL/_vti_bin/client.svc/ProcessQuery" -Type POST -Body $XML -ContentType 'text/xml' -AddedHeaders $AdditionalHeaders
+
+            # Invalidate cached tenant data so subsequent reads reflect the change
+            $Table = Get-CIPPTable -tablename 'cachespotenant'
+            $SafeTenantFilter = ConvertTo-CIPPODataFilterValue -Value $TenantFilter -Type String
+            $CacheEntity = Get-CIPPAzDataTableEntity @Table -Filter "PartitionKey eq 'Tenant' and RowKey eq '$SafeTenantFilter'"
+            if ($CacheEntity) {
+                Remove-AzDataTableEntity @Table -Entity $CacheEntity
+            }
         }
     }
 }

@@ -10,6 +10,7 @@ function Set-CIPPAuthenticationPolicy {
         $TAPDefaultLifeTime = 60, #minutes
         $TAPDefaultLength = 8, #TAP password generated length in chars
         $TAPisUsableOnce = $true,
+        [Parameter()][string[]]$GroupIds,
         [Parameter()][ValidateRange(1, 395)]$QRCodeLifetimeInDays = 365,
         [Parameter()][ValidateRange(8, 20)]$QRCodePinLength = 8,
         $APIName = 'Set Authentication Policy',
@@ -20,12 +21,12 @@ function Set-CIPPAuthenticationPolicy {
     $State = if ($Enabled) { 'enabled' } else { 'disabled' }
     # Get current state of the called authentication method and Set state of authentication method to input state
     try {
-        $CurrentInfo = New-GraphGetRequest -Uri "https://graph.microsoft.com/beta/policies/authenticationmethodspolicy/authenticationMethodConfigurations/$AuthenticationMethodId" -tenantid $Tenant
+        $CurrentInfo = New-GraphGetRequest -Uri "https://graph.microsoft.com/beta/policies/authenticationmethodspolicy/authenticationMethodConfigurations/$AuthenticationMethodId" -tenantid $Tenant -AsApp $True
         $CurrentInfo.state = $State
     } catch {
         $ErrorMessage = Get-CippException -Exception $_
         Write-LogMessage -headers $Headers -API $APIName -tenant $Tenant -message "Could not get CurrentInfo for $AuthenticationMethodId. Error:$($ErrorMessage.NormalizedError)" -sev Error -LogData $ErrorMessage
-        Return "Could not get CurrentInfo for $AuthenticationMethodId. Error:$($ErrorMessage.NormalizedError)"
+        return "Could not get CurrentInfo for $AuthenticationMethodId. Error:$($ErrorMessage.NormalizedError)"
     }
 
     switch ($AuthenticationMethodId) {
@@ -113,16 +114,30 @@ function Set-CIPPAuthenticationPolicy {
                 throw "Setting $AuthenticationMethodId to enabled is not allowed"
             }
         }
-        Default {
+        default {
             Write-LogMessage -headers $Headers -API $APIName -tenant $Tenant -message "Somehow you hit the default case with an input of $AuthenticationMethodId . You probably made a typo in the input for AuthenticationMethodId. It`'s case sensitive." -sev Error
             throw "Somehow you hit the default case with an input of $AuthenticationMethodId . You probably made a typo in the input for AuthenticationMethodId. It`'s case sensitive."
         }
     }
+
+    if ($PSBoundParameters.ContainsKey('GroupIds') -and $GroupIds) {
+        $CurrentInfo.includeTargets = @(
+            foreach ($id in $GroupIds ) {
+                [pscustomobject]@{
+                    targetType = 'group'
+                    id         = $id
+                }
+            }
+        )
+        $OptionalLogMessage += " and targeted groups set to $($CurrentInfo.includeTargets.id -join ', ')"
+    }
+
+
     # Set state of the authentication method
     try {
         if ($PSCmdlet.ShouldProcess($AuthenticationMethodId, "Set state to $State $OptionalLogMessage")) {
             # Convert body to JSON and send request
-            $null = New-GraphPostRequest -tenantid $Tenant -Uri "https://graph.microsoft.com/beta/policies/authenticationmethodspolicy/authenticationMethodConfigurations/$AuthenticationMethodId" -Type PATCH -Body (ConvertTo-Json -InputObject $CurrentInfo -Compress -Depth 10) -ContentType 'application/json'
+            $null = New-GraphPostRequest -tenantid $Tenant -Uri "https://graph.microsoft.com/beta/policies/authenticationmethodspolicy/authenticationMethodConfigurations/$AuthenticationMethodId" -Type PATCH -Body (ConvertTo-Json -InputObject $CurrentInfo -Compress -Depth 10) -ContentType 'application/json' -AsApp $True
             Write-LogMessage -headers $Headers -API $APIName -tenant $Tenant -message "Set $AuthenticationMethodId state to $State $OptionalLogMessage" -sev Info
         }
         return "Set $AuthenticationMethodId state to $State $OptionalLogMessage"
